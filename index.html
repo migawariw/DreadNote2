@@ -154,13 +154,12 @@ onAuthStateChanged(auth, async user => {
 
   if (user.photoURL) userIcon.src = user.photoURL;
 
-  // hash は「ここでは変更しない」
+  // ★ 必ずここで遷移処理
   if (!location.hash || location.hash === '#login') {
     location.hash = '#/list';
-    return; // ← navigate() は呼ばない
   }
 
-  await navigate();
+  await navigate(); // ← 必ず呼ぶ
 });
 window.addEventListener('hashchange', ()=>{
   if (!auth.currentUser) return;
@@ -178,71 +177,142 @@ window.addEventListener('hashchange', ()=>{
 //   });
 // }
 async function loadMetaOnce(){
-  if(metaCache) return metaCache;
+  if (metaCache) return metaCache;
+
+  let metaWasFixed = false;
 
   const metaRef = doc(db,'users',auth.currentUser.uid,'meta','main');
   const snap = await getDoc(metaRef);
 
-  if(snap.exists()){
-    const data = snap.data();
-
-    // 🔥 memos が配列でない場合は強制修正
-    if(Array.isArray(data.memos)){
-      metaCache = data;
-    } else {
-      metaCache = { memos: [] };
+  if (snap.exists()) {
+    metaCache = snap.data();
+    if (!Array.isArray(metaCache.memos)) {
+      metaCache.memos = [];
+      metaWasFixed = true;
     }
   } else {
     metaCache = { memos: [] };
+    metaWasFixed = true;
   }
 
-  // 🔁 meta が空なら復元
-  if(metaCache.memos.length === 0){
+  // 🔁 meta が空なら Firestore から1回だけ復元
+  if (metaCache.memos.length === 0) {
     const memosSnap = await getDocs(
       collection(db,'users',auth.currentUser.uid,'memos')
     );
 
-    metaCache.memos = memosSnap.docs.map(d=>{
+    metaCache.memos = memosSnap.docs.map(d => {
       const m = d.data();
       return {
         id: d.id,
         title: m.title || '',
         updated: m.updated || Date.now(),
-        deleted: false
+        deleted: !!m.deletedAt
       };
     });
 
+    metaWasFixed = true;
+  }
+
+  // 🧠 正規化（壊れたデータ防止）
+  metaCache.memos.forEach(m => {
+    if (typeof m.deleted !== 'boolean') {
+      m.deleted = false;
+      metaWasFixed = true;
+    }
+    if (typeof m.title !== 'string') {
+      m.title = '';
+      metaWasFixed = true;
+    }
+    if (typeof m.updated !== 'number') {
+      m.updated = Date.now();
+      metaWasFixed = true;
+    }
+  });
+
+  // ✅ 「直した時だけ」保存
+  if (metaWasFixed) {
     await setDoc(metaRef, metaCache);
   }
 
   return metaCache;
-}
-
-async function loadMemos(){
-  if(!Array.isArray(metaCache.memos)){
-  console.error('meta.memos is broken', metaCache.memos);
-  metaCache.memos = [];
-}
+}async function loadMemos(){
   await loadMetaOnce();
   memoList.innerHTML='';
 
   metaCache.memos
-    .filter(m=>!m.deleted)
-    .sort((a,b)=>b.updated-a.updated)
-    .forEach(m=>{
-      const li=document.createElement('li');
-      li.className='memo-item';
+    .filter(m => !m.deleted)
+    .sort((a,b)=>b.updated - a.updated)
+    .forEach(m => {
 
-      const span=document.createElement('span');
-      span.className='memo-title';
-      span.textContent=m.title||'Untitled';
+      const li = document.createElement('li');
 
-      li.appendChild(span);
-      li.onclick=()=>location.hash=`#/editor/${m.id}`;
+      const titleSpan = document.createElement('span');
+      titleSpan.className = 'memo-title';
+      titleSpan.textContent = m.title || 'Untitled';
+      li.appendChild(titleSpan);
+
+      /* 右側 */
+      const rightDiv = document.createElement('div');
+      rightDiv.className = 'memo-right';
+
+      const dateSpan = document.createElement('span');
+      dateSpan.className = 'date-span';
+      dateSpan.textContent =
+        new Date(m.updated).toLocaleString('ja-JP',{
+          year:'numeric',month:'2-digit',day:'2-digit',
+          hour:'2-digit',minute:'2-digit'
+        });
+
+      /* ⋯ メニュー */
+      const menuBtn = document.createElement('button');
+      menuBtn.textContent = '⋯';
+      menuBtn.className = 'menu-btn';
+
+      const menuPopup = document.createElement('div');
+      menuPopup.className = 'menu-popup';
+
+      const copyBtn = document.createElement('button');
+      copyBtn.textContent = 'Copy';
+      copyBtn.onclick = async(e)=>{
+        e.stopPropagation();
+        const snap = await getDoc(
+          doc(db,'users',auth.currentUser.uid,'memos',m.id)
+        );
+        navigator.clipboard.writeText(snap.data()?.content || '');
+        showToast('Copied');
+        menuPopup.style.display='none';
+      };
+
+      const delBtn = document.createElement('button');
+      delBtn.textContent = '❌';
+      delBtn.onclick = async(e)=>{
+        e.stopPropagation();
+        m.deleted = true;
+        m.updated = Date.now();
+        await saveMeta();
+        loadMemos();
+        showToast('Moved to Trash');
+        menuPopup.style.display='none';
+      };
+
+      menuPopup.append(copyBtn, delBtn);
+      menuBtn.onclick = e=>{
+        e.stopPropagation();
+        menuPopup.style.display =
+          menuPopup.style.display === 'block' ? 'none' : 'block';
+      };
+
+      rightDiv.append(dateSpan, menuBtn, menuPopup);
+      li.appendChild(rightDiv);
+
+      li.onclick = ()=>{
+        location.hash = `#/editor/${m.id}`;
+      };
+
       memoList.appendChild(li);
     });
-}
-// function renderMemos(){
+}// function renderMemos(){
 //   memoList.innerHTML='';
 //   memosCache.filter(m=>!m.deletedAt).forEach(data=>{
 //     const li=document.createElement('li');
@@ -277,6 +347,7 @@ async function loadMemos(){
 
 /* Trash表示 */
 function loadTrash(){
+  if (!metaCache || !Array.isArray(metaCache.memos)) return;
   trashList.innerHTML='';
 
   metaCache.memos
@@ -442,26 +513,25 @@ document.getElementById('new-memo').onclick = async () => {
 };
 /* Navigation */
 async function navigate(){
-  // ★ ここが最重要
   if (!auth.currentUser) {
     show('login');
     return;
   }
 
-  await loadMetaOnce();
-
   const hash = location.hash;
 
   if (hash.startsWith('#/editor/')) {
+    await loadMetaOnce();           // editor だけ
     const id = hash.split('/')[2];
     if (id) await openEditor(id);
 
   } else if (hash === '#/trash') {
+    await loadMetaOnce();           // trash だけ
     show('trash');
     loadTrash();
 
   } else {
-    // デフォルトは一覧
+    await loadMetaOnce();           // list だけ
     show('list');
     await loadMemos();
   }
