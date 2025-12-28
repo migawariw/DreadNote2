@@ -89,6 +89,7 @@ button{cursor:pointer;}
 </div>
 
 <script type="module">
+import { getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { getFirestore, collection, addDoc, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
@@ -163,15 +164,34 @@ window.addEventListener('hashchange',()=>{ if(auth.currentUser) navigate(); });
 async function loadMetaOnce(){
   if(metaCache) return metaCache;
 
-  const ref = doc(db,'users',auth.currentUser.uid,'meta','main');
-  const snap = await getDoc(ref);
+  const metaRef = doc(db,'users',auth.currentUser.uid,'meta','main');
+  const snap = await getDoc(metaRef);
 
-  if(!snap.exists()){
-    metaCache = { memos: [] };
-    await setDoc(ref, metaCache);
-  } else {
+  if(snap.exists()){
     metaCache = snap.data();
+  } else {
+    metaCache = { memos: [] };
   }
+
+  // 🔥 meta が空なら復元
+  if(metaCache.memos.length === 0){
+    const memosSnap = await getDocs(
+      collection(db,'users',auth.currentUser.uid,'memos')
+    );
+
+    metaCache.memos = memosSnap.docs.map(d=>{
+      const data = d.data();
+      return {
+        id: d.id,
+        title: data.title || '',
+        updated: data.updated || Date.now(),
+        deleted: false
+      };
+    });
+
+    await setDoc(metaRef, metaCache);
+  }
+
   return metaCache;
 }
 async function loadMemos(){
