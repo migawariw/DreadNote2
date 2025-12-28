@@ -145,11 +145,27 @@ document.addEventListener('click',e=>{
 });
 
 /* Auth state */
-onAuthStateChanged(auth, async user=>{
-  if(user){ if(user.photoURL) userIcon.src=user.photoURL; if(!location.hash || location.hash==='#login') location.hash = '#/list'; await navigate(); }
-  else { location.hash='#login'; show('login'); }
+onAuthStateChanged(auth, async user => {
+  if (!user) {
+    location.hash = '#login';
+    show('login');
+    return;
+  }
+
+  if (user.photoURL) userIcon.src = user.photoURL;
+
+  // hash は「ここでは変更しない」
+  if (!location.hash || location.hash === '#login') {
+    location.hash = '#/list';
+    return; // ← navigate() は呼ばない
+  }
+
+  await navigate();
 });
-window.addEventListener('hashchange',()=>{ if(auth.currentUser) navigate(); });
+window.addEventListener('hashchange', ()=>{
+  if (!auth.currentUser) return;
+  navigate();
+});
 
 /* Firestoreキャッシュ + 右ボタン + Trash + プレビュー対応 */
 // let unsubscribe=null;
@@ -426,16 +442,33 @@ document.getElementById('new-memo').onclick = async () => {
 };
 /* Navigation */
 async function navigate(){
-  if(auth.currentUser) await loadMetaOnce();
-  const hash=location.hash;
-  if(hash.startsWith('#/editor/')) { await openEditor(hash.split('/')[2]); }
-  else if(hash==='#/list' || hash==='') { show('list'); await loadMemos(); }
-  else if(hash==='#/trash') { await loadMetaOnce(); show('trash'); loadTrash(); }
-  else if(hash==='#login') show('login');
+  // ★ ここが最重要
+  if (!auth.currentUser) {
+    show('login');
+    return;
+  }
+
+  await loadMetaOnce();
+
+  const hash = location.hash;
+
+  if (hash.startsWith('#/editor/')) {
+    const id = hash.split('/')[2];
+    if (id) await openEditor(id);
+
+  } else if (hash === '#/trash') {
+    show('trash');
+    loadTrash();
+
+  } else {
+    // デフォルトは一覧
+    show('list');
+    await loadMemos();
+  }
 }
 
 /* 初期化 */
-navigate();
+// navigate();
 </script>
 </body>
 </html>
