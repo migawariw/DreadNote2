@@ -346,32 +346,74 @@ async function loadMetaOnce(){
 // }
 
 /* Trash表示 */
-function loadTrash(){
+function loadTrash() {
   if (!metaCache || !Array.isArray(metaCache.memos)) return;
-  trashList.innerHTML='';
+  trashList.innerHTML = '';
 
   metaCache.memos
-    .filter(m=>m.deleted)
-    .sort((a,b)=>b.updated-a.updated)
-    .forEach(m=>{
-      const li=document.createElement('li');
-      const title=document.createElement('span');
-      title.textContent=m.title||'Untitled';
+    .filter(m => m.deleted)
+    .sort((a,b) => b.updated - a.updated)
+    .forEach(m => {
+      const li = document.createElement('li');
 
-      const restore=document.createElement('button');
-      restore.textContent='↩️';
-      restore.onclick=async()=>{
-        await updateMeta(m.id,{deleted:false,updated:Date.now()});
+      // タイトル
+      const titleSpan = document.createElement('span');
+      titleSpan.textContent = m.title || 'Untitled';
+      li.appendChild(titleSpan);
+
+      // 右側の操作領域
+      const rightDiv = document.createElement('div');
+      rightDiv.className = 'memo-right';
+
+      // 復元ボタン
+      const restoreBtn = document.createElement('button');
+      restoreBtn.textContent = '↩️';
+      restoreBtn.onclick = async e => {
+        e.stopPropagation();
+        await updateMeta(m.id, {deleted: false, updated: Date.now()});
         loadTrash();
-		loadMemos(); // ← これ追加
+        await loadMemos(); // メモ一覧も更新
       };
 
-      li.append(title,restore);
+      // ⋯ メニュー
+      const menuBtn = document.createElement('button');
+      menuBtn.textContent = '⋯';
+      menuBtn.className = 'menu-btn';
+
+      const menuPopup = document.createElement('div');
+      menuPopup.className = 'menu-popup';
+
+      // 完全削除ボタン
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'Delete Permanently';
+      delBtn.onclick = async e => {
+        e.stopPropagation();
+        // Firestoreのドキュメントを削除
+        await setDoc(
+          doc(db, 'users', auth.currentUser.uid, 'memos', m.id),
+          {}, // 空オブジェクトで上書き（必要に応じて deleteDoc に変更可）
+          {merge:true}
+        );
+        // meta からも削除
+        metaCache.memos = metaCache.memos.filter(mm => mm.id !== m.id);
+        await saveMeta();
+        loadTrash();
+        showToast('Deleted permanently');
+      };
+
+      menuPopup.appendChild(delBtn);
+      menuBtn.onclick = e => {
+        e.stopPropagation();
+        menuPopup.style.display =
+          menuPopup.style.display === 'block' ? 'none' : 'block';
+      };
+
+      rightDiv.append(restoreBtn, menuBtn, menuPopup);
+      li.appendChild(rightDiv);
+
       trashList.appendChild(li);
     });
-}
-
-/* Editor */
+}/* Editor */
 async function openEditor(id){
   currentMemoId=id;
 
