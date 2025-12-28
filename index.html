@@ -168,23 +168,30 @@ async function loadMetaOnce(){
   const snap = await getDoc(metaRef);
 
   if(snap.exists()){
-    metaCache = snap.data();
+    const data = snap.data();
+
+    // 🔥 memos が配列でない場合は強制修正
+    if(Array.isArray(data.memos)){
+      metaCache = data;
+    } else {
+      metaCache = { memos: [] };
+    }
   } else {
     metaCache = { memos: [] };
   }
 
-  // 🔥 meta が空なら復元
+  // 🔁 meta が空なら復元
   if(metaCache.memos.length === 0){
     const memosSnap = await getDocs(
       collection(db,'users',auth.currentUser.uid,'memos')
     );
 
     metaCache.memos = memosSnap.docs.map(d=>{
-      const data = d.data();
+      const m = d.data();
       return {
         id: d.id,
-        title: data.title || '',
-        updated: data.updated || Date.now(),
+        title: m.title || '',
+        updated: m.updated || Date.now(),
         deleted: false
       };
     });
@@ -194,7 +201,12 @@ async function loadMetaOnce(){
 
   return metaCache;
 }
+
 async function loadMemos(){
+  if(!Array.isArray(metaCache.memos)){
+  console.error('meta.memos is broken', metaCache.memos);
+  metaCache.memos = [];
+}
   await loadMetaOnce();
   memoList.innerHTML='';
 
